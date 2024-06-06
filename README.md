@@ -6,13 +6,13 @@
 
 ## 概要
 
-このAIは服装の配色が最適かを判定するAIです。追加課題の内容的には改善案を提案する機能もありましたが、改善案を提案するNNを作成しましが、精度が低かったため今回は未実装です。
+このモデルは服装の配色が最適かを判定し、適した配色を提案するモデルです。
 
-メインファイルはmain.ipynbとなっています。実行は[Google Colaboratory](https://colab.research.google.com/?hl=jav)上でお願いします。また実行には学習済みモデルであるmodel.savを読み込む必要があります。
+メインファイルはmain.ipynbとなっています。実行は[Google Colaboratory](https://colab.research.google.com/?hl=jav)上でお願いします。また実行には学習済みモデルであるmodel.sav,generator_model.pthを読み込む必要があります。
 
 ## 開発方法について
 
-今回のモデル作成にあたって服を着た画像を訓練データにするのはデータの収集の難易度が高かったため、2色の色から配色の適正を判定するモデルを作成しました。アルゴリズムにサポートベクターマシン（SVM）を使用したのは入力、出力ともに単純であり、少ないデータ量で高い精度を実現できるからです。
+今回のモデル作成にあたって服を着た画像を訓練データにするのはデータの収集の難易度が高かったため、2色の色から配色の適正を判定するモデルを作成しました。アルゴリズムにサポートベクターマシン（SVM）を使用したのは入力、出力ともに単純であり、少ないデータ量で高い精度を実現できるからです。最適配色の生成にはGANを参考にしました。
 
 <img src="./image/Figure1.png" width="400px">
 
@@ -139,7 +139,7 @@ const createFalseData = () => {
 };
 ```
 
-### 2.SVMを用いた学習
+### 2. SVMを用いた配色適格診断モデルの学習
 
 入力：RGB情報（6）（[:3]：色1,　[3:]：色2）
 
@@ -149,13 +149,26 @@ const createFalseData = () => {
 
 ファイル名：SVM.ipynb
 
-テストデータでの正答率約88％です。
+### 3. 最適配色生成モデル
 
-### 3.入力画像の整形
+入力：RGB情報（6）（[:3]：色1,　[3:]：色2）
 
-1. 上半身と下半身の境目を検出
+出力：RGB情報（3）
 
-入力された画像は一度グレースケール変換を行い、一次微分フィルタを通じて上半身と下半身の境目を検出します。
+アルゴリズム：GAN(敵対的生成ネットワーク)
+
+ファイル名：GAN.ipynb
+
+RGB値からRGBを生成するにあたり深層学習アーキテクチャであるGANを参考にしました。特に今回はPix2Pixを参考にして学習しました。
+Generatorには下半身の色（RGB値）を入力し、偽の上半身の色（RGB値）を出力させます。Discriminaterは真の上半身の色（RGB値）と偽の上半身の色（RGB値）を入力しその真偽を学習させます。画像を生成するわけではないのでPix2Pixで使われているU-netは実装せずに簡素なNNをGeneratorとDiscriminatorのアーキテクチャとしました。
+
+### 4. 入力画像の整形・評価前処理
+
+入力画像は人物の背景が白色であり、画像には人物のみが写っているものが最適です。
+
+#### 4-1. 上半身と下半身の境目を検出
+
+入力された画像は一度グレースケール変換を行い、垂直方向の一次微分フィルタを通じて上半身と下半身の境目を検出します。
 
 ```py
 #上半身と下半身の境目を検出
@@ -164,81 +177,67 @@ ave_color = (np.average(img_v) + np.max(img_v)) / 2
 
 line = np.where(img_v > ave_color)[0]
 
-k = img_h // 10
+k = img_h // 100
 count_list = []
 
 for y in range(0, img_h, k):
     count_list.append(np.count_nonzero((line > y) & (y + k > line)))
 
-count_list.sort(reverse=True)
 count_list = list(map(lambda x: count_list.index(x) * k + (k // 2), count_list))
 
-
 edge = count_list[np.abs(np.asarray(count_list) - (img_h / 2)).argmin()]
-img_color_np[edge, 0:] = 0
 ```
 
-2. 背景色の消去
+#### 4-2.　色の量子化
 
-背景色である白色を画像から消します。
+入力画像の判定には画像の中央（写真の横幅の２分の１の長さ）から全高を10x10に分割しそれぞれのメインカラー5色を抽出します。
+メインカラーの抽出には色の量子化の技術を使用しています。
 
-3. 判定
+>
+コンピュータグラフィックスにおいて、色の量子化（いろのりょうしか、英語: color quantization）またはカラー画像の量子化（カラーがぞうのりょうしか、英語: color image quantization）とは元の画像とできるだけ同じに見えるようにしつつ、画像内で使われる異なる色の数を減らす手法である。
 
-入力画像の判定には画像の中央（写真の横幅の２分の１の長さ）から縦すべてを10x10に分割しそれぞれのそれらの平均値を算出しモデルの入力とします。
+今回この処理にはK-means法を使用しています。color_quantization関数では任意のグループ数に応じて主要となる色のRGB値を戻り値としています。
+
+```py
+#色の量子化関数
+
+def color_quantization(img, k):
+    cluster = KMeans(n_clusters=k)
+    cluster.fit(X=img)
+    return cluster.cluster_centers_
+```
 
 <img src="./image/Figure2.png" width="800px">
 
-```py
-#判定
+### 5. 配色適格診断モデルによる評価
 
+量子化によって抽出されたメインカラーそれぞれを学習済みの配色適格診断モデルを用いて評価します。その結果の平均値を求めます。
+
+```py
 kernel_size = 10
-output_size = (img_h // kernel_size) * (img_w // kernel_size)
 
 output = []
+new_color_list = []
 
-for y in range(0, edge, kernel_size):
+for y in range(0, img_h - edge, kernel_size):
     for x in range(img_w // 4, (img_w // 4) * 3, kernel_size):
-        kernel_1_on_color_ave = []
-        kernel_2_on_color_ave = []
+        upper_body_main_color = color_quantization((img_color_np[y:y + kernel_size, x:x + kernel_size]).reshape(-1, 3), 5)
+        lower_body_main_color = color_quantization((img_color_np[edge + y:edge + y + kernel_size, x:x + kernel_size]).reshape(-1, 3), 5)
 
-        kernel_1 = img_color_np[y:y + kernel_size, x:x + kernel_size]
+        for i in range(len(upper_body_main_color)):
+            input = np.concatenate([upper_body_main_color[i] / 255,lower_body_main_color[i] / 255])
 
-        kernel_1_on_color = []
-        for row in kernel_1:
-            for color in row:
-                if(np.average(color) > 0):
-                    kernel_1_on_color.append(color)
-
-        kernel_1_on_color = np.array(kernel_1_on_color)
-        if(len(kernel_1_on_color) != 0):
-            kernel_1_on_color_ave = np.mean(kernel_1_on_color, axis=0)
-
-        kernel_2 = img_color_np[edge + y:edge + y + kernel_size, x:x + kernel_size]
-
-        kernel_2_on_color = []
-        for row in kernel_2:
-            for color in row:
-                if(np.average(color) > 0):
-                    kernel_2_on_color.append(color)
-
-        kernel_2_on_color = np.array(kernel_2_on_color)
-        if(len(kernel_2_on_color) != 0):
-            kernel_2_on_color_ave = np.mean(kernel_2_on_color, axis=0)
-
-        if(len(kernel_1_on_color_ave) != 0 and len(kernel_2_on_color_ave) != 0):
-            color_1 = kernel_1_on_color_ave / 255
-            color_2 = kernel_2_on_color_ave / 255
-
-
-            input = np.concatenate([color_1,color_2])
-
-            #conversion_color(kernel_1_on_color_ave, kernel_2_on_color_ave)
-
-            predict = model.predict([input])[0]
-            #print(predict)
+            predict = svm_model.predict([input])[0]
             output.append(predict)
+```
 
-output = np.array(output)
+### 6.最適配色の生成モデルによる上半身のカラー生成
+
+最適配色生成モデルに下半身のメインカラーを入力することで下半身に対する上半身の最適な色を生成します。
+
+```py
+new_color = generator_model(torch.tensor((lower_body_main_color[i] / 255),  dtype=torch.float32).to(device))
+new_color_list.append(np.array(new_color.tolist()) * 255)
 ```
 
 ## 問題点について
@@ -253,11 +252,9 @@ output = np.array(output)
 
 これはピクセルごとのRGB情報を取得しているだけのため、画像に日陰などがあると服の色が実際は赤でも茶色のように認識されることがある
 
-### ・白色に弱い
+### ・最適配色の生成モデルの精度が悪い
 
-背景色として白色を削除するようにしているため服そのものに白色が含まれている場合その部分が削除されることがある。
-
-→人のみをトリミングする
+訓練データには1つの色（RGB値）に対して様々な最適色が用意されているため、それらの色が混ざった色が出力されることがある。
 
 ### ・精度が悪い
 
