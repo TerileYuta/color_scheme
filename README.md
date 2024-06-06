@@ -160,7 +160,48 @@ const createFalseData = () => {
 ファイル名：GAN.ipynb
 
 RGB値からRGBを生成するにあたり深層学習アーキテクチャであるGANを参考にしました。特に今回はPix2Pixを参考にして学習しました。
-Generatorには下半身の色（RGB値）を入力し、偽の上半身の色（RGB値）を出力させます。Discriminaterは真の上半身の色（RGB値）と偽の上半身の色（RGB値）を入力しその真偽を学習させます。画像を生成するわけではないのでPix2Pixで使われているU-netは実装せずに簡素なNNをGeneratorとDiscriminatorのアーキテクチャとしました。
+Generatorには下半身の色（RGB値）を入力し、偽の上半身の色（RGB値）を出力させます。Discriminatorは真の上半身の色（RGB値）と偽の上半身の色（RGB値）を入力しその真偽を学習させます。画像を生成するわけではないのでPix2Pixで使われているU-netは実装せずに簡素なNNをGeneratorとDiscriminatorのアーキテクチャとしました。
+
+<img src="./image/Figure3.png" width="800px">
+
+```py
+#Discriminatorクラス
+
+class discriminator(nn.Module):
+    def __init__(self):
+        super(discriminator, self).__init__()
+
+        self.fc1 = nn.Linear(3, 512)
+        self.fc2 = nn.Linear(512, 1)
+        self.activation = nn.LeakyReLU(0.1)
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.activation(x)
+        x = self.fc2(x)
+
+        return nn.Sigmoid()(x)
+```
+
+```py
+#Generatorクラス
+
+class generator(nn.Module):
+    def __init__(self):
+        super(generator, self).__init__()
+
+        self.fc1 = nn.Linear(3, 1024)
+        self.fc2 = nn.Linear(1024, 2048)
+        self.fc3 = nn.Linear(2048, 3)
+        self.activation = nn.ReLU()
+
+    def forward(self, x):
+        x = self.activation(self.fc1(x))
+        x = self.activation(self.fc2(x))
+        x = self.fc3(x)
+
+        return nn.Tanh()(x)
+```
 
 ### 4. 入力画像の整形・評価前処理
 
